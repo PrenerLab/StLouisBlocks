@@ -1,0 +1,207 @@
+---
+title: "street barriers"
+author: "Emily McCarthy"
+date: '(`r format(Sys.time(), "%B %d, %Y")`)'
+output: 
+  github_document: default
+  html_notebook: default 
+---
+
+## Introduction
+This notebook...
+
+## Dependencies
+This notebook requires...
+
+```{r load-packages}
+# tidyverse packages
+library(dplyr)
+library(stringr)
+library(tibble)
+library(fuzzyjoin)
+library(readr)
+library(tidyr)
+
+# other packages
+library(here)
+library(sf)
+library(janitor)
+library(naniar)
+```
+
+## Load Data
+This notebook requires these data:
+
+```{r load-data}
+RAW_ADDRESS <- st_read(here("data", "pargeocd", "pargeocd.shp"), stringsAsFactors = FALSE)
+CENSUS <- st_read(here("data", "tl_2018_29510_addrfeat", "tl_2018_29510_addrfeat.shp"), stringsAsFactors = FALSE)
+```
+
+## Part 1
+I will first attempt to find missing varibales in the census data. 
+
+```{r p1-q1}
+miss_var_summary(CENSUS)
+```
+
+I will now combine the two columns of address data in `RAW_ADDRESSES` to include streetname and street type in the same column. 
+
+```{r}
+RAW_ADDRESS %>%
+  mutate(COMPLETESTREET = str_c(STREETNAME, STREETTYPE, sep = " ")) -> ADDRESSES
+
+ADDRESSES %>%
+  select(HANDLE, HOUSENUM, UNITNUM, COMPLETESTREET, ZIP, PARCELID, CITYBLOCK, PARCEL, ADDRRECNUM ) -> ADDRESSES
+```
+
+I will now determine if ADDRECNUM is a unique column variable. 
+
+I will now rename one of the variables in `CENSUS_ADDRESS`
+
+```{r}
+CENSUS %>%
+  rename(
+    COMPLETESTREET = FULLNAME
+  ) -> CENSUS
+```
+
+I will now select only necessary columns
+
+```{r}
+CENSUS %>%
+mutate(toupper(CENSUS$COMPLETESTREET)) -> CENSUS 
+```
+
+Reformatting data tables
+
+```{r}
+CENSUS %>%
+  select(-COMPLETESTREET) %>%
+  rename(COMPLETESTREET = `toupper(CENSUS$COMPLETESTREET)`) -> CENSUS_CLEAN
+```
+
+```{r}
+ADDRESSES %>%
+ filter(is.na(UNITNUM) == TRUE) %>%
+  mutate(HOUSENUM = as.numeric(HOUSENUM)) -> ADDRESSES
+Census_drop %>%
+  mutate(LFROMHN = as.numeric(LFROMHN)) %>%
+  mutate(RTOHN = as.numeric(RTOHN)) -> Census_drop
+```
+
+I will now join these tables. 
+First I will set geometry to NULL
+
+```{r}
+# define odd function 
+is.odd <- function(x){
+  x %% 2 != 0
+}
+
+#reducing block columns
+CENSUS_CLEAN %>%
+  select(-LFROMTYP, -LTOTYP, -RFROMTYP, -RTOTYP, -PARITYL, -PARITYR, -ZIPL, -ZIPR, -ARIDL, -ARIDR, -PLUS4L, -PLUS4R, -EDGE_MTFCC, -ROAD_MTFCC, -OFFSETL, -OFFSETR, -TFIDL, -TFIDR) -> Census_drop
+
+#reducing address columns
+ADDRESSES %>%
+  select(-PARCELID, -ADDRRECNUM) -> ADDRESSES
+
+# odd and even addresses
+ADDRESSES_O <- filter(ADDRESSES, is.odd(HOUSENUM) == TRUE)
+ADDRESSES_E <- filter(ADDRESSES, is.odd(HOUSENUM) == FALSE)
+
+#converting to integer
+Census_drop %>%
+mutate(
+    RFROMHN = as.integer(RFROMHN),
+    RTOHN = as.integer(RTOHN)
+  ) %>%
+  filter(is.na(RFROMHN) == FALSE) -> Census_drop_odd
+
+Census_drop %>%
+  mutate(
+    LFROMHN = as.integer(LFROMHN),
+    LTOHN = as.integer(LTOHN)
+  ) %>%
+  filter(is.na(LFROMHN) == FALSE) -> Census_drop_even
+
+# removing geometry
+st_geometry(Census_drop_even) <- NULL
+st_geometry(Census_drop_odd) <- NULL
+
+```
+
+Joining even blocks and addresses
+
+```{r}
+even_join <- fuzzy_left_join(ADDRESSES_E, Census_drop_even,
+                                by = c(
+                                  "HOUSENUM" = "LFROMHN",
+                                  "HOUSENUM" = "LTOHN",
+                                  "ADDRESS" = "FULLNAME"
+                                ),
+                                match_fun = list(`>=`, `<=`, `==`) )
+```
+
+Recieved the following error; reducing number of variables in each table.
+  "Error: vector memory exhausted (limit reached?)"
+
+Joining odd blocks and addresses
+
+```{r}
+odd_join <- fuzzy_left_join(ADDRESSES_O, Census_drop_odd,
+                                 by = c(
+                                   "HOUSENUM" = "RFROMHN",
+                                   "HOUSENUM" = "RTOHN",
+                                   "ADDRESS" = "FULLNAME"
+                                 ),
+                                 match_fun = list(`>=`, `<=`, `==`) )
+```
+
+
+
+
+-------------------------OLD CODE BELOW -----------------------------
+
+```{r}
+JOINED_ADDRESS <- fuzzy_left_join(ADDRESSES, Census_drop,
+                                  by = (c(
+                                 "LFROMHN" = "HOUSENUM",
+                                  "LTOHN" = "HOUSENUM",
+                                  "COMPLETESTREET" = "COMPLETESTREET")),
+                                  match_fun = list(`<=`, `>=`, `==`))
+```
+
+```{r}
+JOINED_LEFT <- fuzzy_left_join(Census_drop, ADDRESSES,
+                                  by = as.numeric(c(
+                                    "LFROMHN" = "HOUSENUM",
+                                    "LTOHN" = "HOUSENUM",
+                                    "COMPLETESTREET" = "COMPLETESTREET")),
+                                  match_fun = list(`<=`, `>=`, `==`))
+```
+
+by = c(
+                        "number" = "rightLow",
+                        "number" = "leftHigh",
+                        "street" = "street"
+                    ),
+                    match_fun = list(`>=`, `<=`, `==`) )
+
+
+```{r}
+# JOINED_ADDRESS <- select(JOINED_ADDRESS, -PLUS4L, -PLUS4R)
+JOINED_ADDRESS <- select(JOINED_ADDRESS, -LFROMTYP, -LTOTYP, -RFROMTYP, -RTOTYP, -PARITYL, -PARITYR)
+
+```
+
+
+```{r}
+JOINED_LEFT_slice <- fuzzy_left_join(ADDRESSES, slice,
+                                  by = c(
+                                    "HOUSENUM" = "LFROMHN",
+                                    "HOUSENUM" = "LTOHN",
+                                    "COMPLETESTREET" = "COMPLETESTREET"),
+                                  match_fun = list(`>=`, `<=`, `==`))
+```
+
