@@ -80,23 +80,6 @@ CENSUS %>%
   rename(COMPLETESTREET = `toupper(CENSUS$COMPLETESTREET)`) -> CENSUS_CLEAN
 ```
 
-
-I will now join these tables. 
-First I will set geometry to NULL
-
-```{r}
-#st_geometry(CENSUS_CLEAN) <- NULL
-
-# FULL_JOINED_ADDRESS <- drop_na(JOINED_ADDRESS)
-CENSUS_CLEAN %>%
-  mutate(LFROMHN = ifelse(is.na(LFROMHN) == TRUE, 0, LFROMHN)) %>%
-  mutate(LTOHN = ifelse(is.na(LTOHN) == TRUE, 0, LTOHN)) %>%
-  mutate(RFROMHN = ifelse(is.na(RFROMHN) == TRUE, 0, RFROMHN)) %>%
-  mutate(RTOHN= ifelse(is.na(RTOHN) == TRUE, 0, RTOHN))%>%
-  select(-LFROMTYP, -LTOTYP, -RFROMTYP, -RTOTYP, -PARITYL, -PARITYR, -ZIPL, -ZIPR, -ARIDL, -ARIDR, -PLUS4L, -PLUS4R, -EDGE_MTFCC, -ROAD_MTFCC, -OFFSETL, -OFFSETR) -> Census_drop
-
-```
-
 ```{r}
 ADDRESSES %>%
  filter(is.na(UNITNUM) == TRUE) %>%
@@ -105,6 +88,80 @@ Census_drop %>%
   mutate(LFROMHN = as.numeric(LFROMHN)) %>%
   mutate(RTOHN = as.numeric(RTOHN)) -> Census_drop
 ```
+
+I will now join these tables. 
+First I will set geometry to NULL
+
+```{r}
+# define odd function 
+is.odd <- function(x){
+  x %% 2 != 0
+}
+
+#reducing block columns
+CENSUS_CLEAN %>%
+  select(-LFROMTYP, -LTOTYP, -RFROMTYP, -RTOTYP, -PARITYL, -PARITYR, -ZIPL, -ZIPR, -ARIDL, -ARIDR, -PLUS4L, -PLUS4R, -EDGE_MTFCC, -ROAD_MTFCC, -OFFSETL, -OFFSETR, -TFIDL, -TFIDR) -> Census_drop
+
+#reducing address columns
+ADDRESSES %>%
+  select(-PARCELID, -ADDRRECNUM) -> ADDRESSES
+
+# odd and even addresses
+ADDRESSES_O <- filter(ADDRESSES, is.odd(HOUSENUM) == TRUE)
+ADDRESSES_E <- filter(ADDRESSES, is.odd(HOUSENUM) == FALSE)
+
+#converting to integer
+Census_drop %>%
+mutate(
+    RFROMHN = as.integer(RFROMHN),
+    RTOHN = as.integer(RTOHN)
+  ) %>%
+  filter(is.na(RFROMHN) == FALSE) -> Census_drop_odd
+
+Census_drop %>%
+  mutate(
+    LFROMHN = as.integer(LFROMHN),
+    LTOHN = as.integer(LTOHN)
+  ) %>%
+  filter(is.na(LFROMHN) == FALSE) -> Census_drop_even
+
+# removing geometry
+st_geometry(Census_drop_even) <- NULL
+st_geometry(Census_drop_odd) <- NULL
+
+```
+
+Joining even blocks and addresses
+
+```{r}
+even_join <- fuzzy_left_join(ADDRESSES_E, Census_drop_even,
+                                by = c(
+                                  "HOUSENUM" = "LFROMHN",
+                                  "HOUSENUM" = "LTOHN",
+                                  "ADDRESS" = "FULLNAME"
+                                ),
+                                match_fun = list(`>=`, `<=`, `==`) )
+```
+
+Recieved the following error; reducing number of variables in each table.
+  "Error: vector memory exhausted (limit reached?)"
+
+Joining odd blocks and addresses
+
+```{r}
+odd_join <- fuzzy_left_join(ADDRESSES_O, Census_drop_odd,
+                                 by = c(
+                                   "HOUSENUM" = "RFROMHN",
+                                   "HOUSENUM" = "RTOHN",
+                                   "ADDRESS" = "FULLNAME"
+                                 ),
+                                 match_fun = list(`>=`, `<=`, `==`) )
+```
+
+
+
+
+-------------------------OLD CODE BELOW -----------------------------
 
 ```{r}
 JOINED_ADDRESS <- fuzzy_left_join(ADDRESSES, Census_drop,
@@ -138,13 +195,6 @@ JOINED_ADDRESS <- select(JOINED_ADDRESS, -LFROMTYP, -LTOTYP, -RFROMTYP, -RTOTYP,
 
 ```
 
-```{r}
-slice(Census_drop, 1:150) -> slice
-```
-
-```{r}
-slice(ADDRESSES, 1:150) -> address_slice
-```
 
 ```{r}
 JOINED_LEFT_slice <- fuzzy_left_join(ADDRESSES, slice,
